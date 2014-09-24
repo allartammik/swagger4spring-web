@@ -15,6 +15,7 @@ import com.knappsack.swagger4springweb.parser.ApiParserImpl;
 import com.wordnik.swagger.model.ApiDescription;
 import com.wordnik.swagger.model.ApiListing;
 import com.wordnik.swagger.model.ApiListingReference;
+import com.wordnik.swagger.model.AuthorizationType;
 import com.wordnik.swagger.model.ResourceListing;
 
 import scala.collection.Iterator;
@@ -75,7 +76,7 @@ public class ApiCategoryTest extends AbstractTest {
   }
 
   private ApiParser createApiParser(List<String> controllerPackages) {
-    return new ApiParserImpl(API_INFO, controllerPackages, "http://localhost:8080/api", "/api", "v1",
+    return new ApiParserImpl(API_INFO, new ArrayList<AuthorizationType>(), controllerPackages, "http://localhost:8080/api", "/api", "v1",
         new ArrayList<String>(), true, null);
   }
 

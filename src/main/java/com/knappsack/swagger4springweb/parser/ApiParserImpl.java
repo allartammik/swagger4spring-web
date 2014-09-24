@@ -153,7 +153,7 @@ public class ApiParserImpl implements ApiParser {
               }
             }
 
-            if (apiListing.apis().size() == 0) {
+            if (apiListing.apis() == null) {
                 apiListing = processMethods(requestMappingMethods, controllerClass, apiListing, description);
             }
             if (apiCategory != null && apiCategory.value() != null) {
