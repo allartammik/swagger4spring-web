@@ -1,5 +1,25 @@
 package com.knappsack.swagger4springweb.parser;
 
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+
+import org.reflections.Reflections;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.knappsack.swagger4springweb.annotation.ApiCategory;
 import com.knappsack.swagger4springweb.controller.ApiDocumentationController;
 import com.knappsack.swagger4springweb.filter.ApiExcludeFilter;
 import com.knappsack.swagger4springweb.filter.Filter;
@@ -9,17 +29,17 @@ import com.knappsack.swagger4springweb.util.JavaToScalaUtil;
 import com.knappsack.swagger4springweb.util.ScalaToJavaUtil;
 import com.wordnik.swagger.annotations.Api;
 import com.wordnik.swagger.config.SwaggerConfig;
-import com.wordnik.swagger.model.*;
-import org.reflections.Reflections;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import scala.Option;
+import com.wordnik.swagger.model.ApiDescription;
+import com.wordnik.swagger.model.ApiInfo;
+import com.wordnik.swagger.model.ApiListing;
+import com.wordnik.swagger.model.ApiListingReference;
+import com.wordnik.swagger.model.AuthorizationType;
+import com.wordnik.swagger.model.Model;
+import com.wordnik.swagger.model.Operation;
+import com.wordnik.swagger.model.ResourceListing;
 
-import java.lang.reflect.Method;
-import java.util.*;
+import scala.Option;
+import scala.Some;
 
 public class ApiParserImpl implements ApiParser {
 
@@ -27,7 +47,7 @@ public class ApiParserImpl implements ApiParser {
 
     private static final String swaggerVersion = com.wordnik.swagger.core.SwaggerSpec.version();
 
-    private final Map<String, ApiListing> apiListingMap = new HashMap<String, ApiListing>();
+    private final Map<String, ApiListing> apiListingMap = new TreeMap<>();
 
     private final List<String> controllerPackages;
     private final List<String> ignorableAnnotations;
@@ -69,7 +89,7 @@ public class ApiParserImpl implements ApiParser {
         List<ApiListingReference> apiListingReferences = new ArrayList<ApiListingReference>();
         for (String key : apiListingMap.keySet()) {
             ApiListing apiListing = apiListingMap.get(key);
-            String docPath = "/doc"; //servletPath + "/doc"; //"/api/doc";
+          String docPath = "/doc"; //servletPath + "/doc"; //"/api/doc";
             ApiListingReference apiListingReference = new ApiListingReference(docPath + key, apiListing.description(),
                     apiListing.position());
 
@@ -97,7 +117,7 @@ public class ApiParserImpl implements ApiParser {
                 swaggerConfig.info());
     }
 
-    public Map<String, ApiListing> createApiListings() {
+  public Map<String, ApiListing> createApiListings() {
         Set<Class<?>> controllerClasses = new HashSet<Class<?>>();
         for (String controllerPackage : controllerPackages) {
             Reflections reflections = new Reflections(controllerPackage);
@@ -123,13 +143,28 @@ public class ApiParserImpl implements ApiParser {
             Set<Method> requestMappingMethods = AnnotationUtils.getAnnotatedMethods(controllerClass, RequestMapping.class);
             ApiListing apiListing = processControllerApi(controllerClass);
             String description = "";
-            Api controllerApi = controllerClass.getAnnotation(Api.class);
-            if (controllerApi != null) {
+            ApiCategory apiCategory = AnnotationUtils.getAnnotationAnnotation(ApiCategory.class, controllerClass);
+            if (apiCategory != null) {
+              description = apiCategory.description();
+            } else {
+              Api controllerApi = controllerClass.getAnnotation(Api.class);
+              if (controllerApi != null) {
                 description = controllerApi.description();
+              }
             }
 
             if (apiListing.apis().size() == 0) {
                 apiListing = processMethods(requestMappingMethods, controllerClass, apiListing, description);
+            }
+            if (apiCategory != null && apiCategory.value() != null) {
+              String key = prependSlashIfMissing(apiCategory.value());
+              ApiListing existingApiListing = apiListingMap.get(key);
+              if (existingApiListing != null) {
+                apiListing = ApiListingUtil.combine(existingApiListing, apiListing);
+              }
+
+              addApiListingToMap(apiListing, key);
+              continue;
             }
 
             //Allow for multiple controllers having the same resource path.
@@ -140,12 +175,17 @@ public class ApiParserImpl implements ApiParser {
 
             // controllers without any operations are excluded from the apiListingMap list
             if (apiListing.apis() != null && !apiListing.apis().isEmpty()) {
-                apiListingMap.put(apiListing.resourcePath(), apiListing);
+              addApiListingToMap(apiListing, apiListing.resourcePath());
             }
         }
 
         return apiListingMap;
     }
+
+  private void addApiListingToMap(ApiListing apiListing, String key) {
+    apiListingMap.put(key, ApiListingUtil.sortApisByPath(apiListing));
+  }
+
 
     private ApiListing processControllerApi(Class<?> controllerClass) {
         String resourcePath = "";
@@ -163,26 +203,53 @@ public class ApiParserImpl implements ApiParser {
                 resourcePath = controllerClass.getName();
             }
         }
-        if (!resourcePath.startsWith("/")) {
-            resourcePath = "/" + resourcePath;
-        }
+      resourcePath = prependSlashIfMissing(resourcePath);
 
-        String docRoot = resourcePath;
+      String docRoot = resourcePath;
         if(docRoot.contains(controllerClass.getName())) {
             docRoot = docRoot.replace(controllerClass.getName(), "");
         }
         SpringApiReader reader = new SpringApiReader();
         Option<ApiListing> apiListingOption = reader.read(docRoot, controllerClass, swaggerConfig);
+
         ApiListing apiListing = null;
+        Option<String> descriptionOption = null;
+        String categoryValue = null;
+
+        ApiCategory category = AnnotationUtils.getAnnotationAnnotation(ApiCategory.class, controllerClass);
+        String description = null;
+        if (category != null) {
+          categoryValue = category.value();
+          description = category.description();
+          descriptionOption = Some.apply(description);
+        }
+
         if (apiListingOption.nonEmpty()) {
-            apiListing = apiListingOption.get();
+          apiListing = apiListingOption.get();
+          apiListing = ApiListingUtil.changeDescription(apiListing, description);
+        }
+
+
+        //Allow for multiple controllers having the same resource path.
+        if (categoryValue != null) {
+          ApiListing existingApiListing = apiListingMap.get(categoryValue);
+          if (existingApiListing != null) {
+            return existingApiListing;
+          }
+        }
+        ApiListing existingApiListing = apiListingMap.get(resourcePath);
+        if (existingApiListing != null) {
+            return existingApiListing;
         }
 
         if (apiListing != null) {
             return apiListing;
         }
 
-        return ApiListingUtil.baseApiListing(apiVersion, swaggerVersion, basePath, resourcePath);
+//        TODO add descriptionOption support:
+// return ApiListingUtil.baseApiListing(apiVersion, swaggerVersion, basePath, resourcePath);
+        return new ApiListing(apiVersion, swaggerVersion, basePath, resourcePath, null, null, null, null, null, null,
+                descriptionOption, 0);
     }
 
     private ApiListing processMethods(Collection<Method> methods, Class<?> controllerClass, ApiListing apiListing, String description) {
@@ -265,4 +332,12 @@ public class ApiParserImpl implements ApiParser {
         }
         return false;
     }
+
+    private String prependSlashIfMissing(String key) {
+      if (!key.startsWith("/")) {
+        key = "/" + key;
+      }
+      return key;
+    }
+
 }

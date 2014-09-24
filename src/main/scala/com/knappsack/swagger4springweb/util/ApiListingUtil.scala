@@ -1,5 +1,6 @@
 package com.knappsack.swagger4springweb.util
 
+
 import com.wordnik.swagger.model.{Authorization, ApiDescription, Model, ApiListing}
 
 object ApiListingUtil {
@@ -23,5 +24,10 @@ object ApiListingUtil {
       (apiListing1.protocols ++ apiListing2.protocols).distinct, (apiListing1.authorizations ++ apiListing2.authorizations).distinct,
       (apiListing1.apis ++ apiListing2.apis).distinct, Option(mergedModels), apiListing1.description, apiListing1.position)
   }
+
+
+  def combine(main: ApiListing, additional : ApiListing) : ApiListing = main.copy(apis = main.apis ++ additional.apis)
+  def sortApisByPath(obj: ApiListing) : ApiListing = obj.copy(apis = obj.apis.sortBy(api => api.path))
+  def changeDescription(obj: ApiListing, desc: String) : ApiListing = obj.copy(description = Some(desc))
 
 }
